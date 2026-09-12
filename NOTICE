@@ -1,0 +1,57 @@
+vllm-qwen3.8-flash-next-rtx-pro-6000-sharp-monitoring
+Copyright 2026 Wombat Software
+
+This product includes software developed by Wombat Software, licensed under
+the Apache License, Version 2.0 (see LICENSE).
+
+================================================================================
+Third-party components redistributed in this repository
+================================================================================
+
+chat_template.jinja
+-------------------
+A verbatim copy of the root chat_template.jinja from:
+
+    peculiar-ragdoll/Qwen-Sharp-Chat-Templates
+    https://huggingface.co/peculiar-ragdoll/Qwen-Sharp-Chat-Templates
+    Version v22.5.0, HF commit 85461fc118aaf25e7319c7ecf2481f944aac3a32
+    sha256 cdff39fb26b60dc90faa292e726655c6b21f62db497846e02e4c4bbab942a84a
+    Licensed under the Apache License, Version 2.0
+
+That template is itself derived from:
+
+    froggeric/Qwen-Fixed-Chat-Templates
+    https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates
+    Licensed under the Apache License, Version 2.0
+
+The template's internal version string is "qwen3.8-froggeric-v22.5.0",
+preserving that lineage. It is redistributed here unmodified, purely so this
+recipe is self-contained and reproducible. Run ./scripts/verify-chat-template.sh
+to confirm the copy still matches the upstream commit above.
+
+Neither peculiar-ragdoll nor froggeric endorses this repository.
+
+================================================================================
+Components referenced but NOT redistributed here
+================================================================================
+
+These are downloaded or pulled at build/run time and remain under their own
+licences. This repository contains none of their code or weights.
+
+  vLLM                                       Apache-2.0
+  https://github.com/vllm-project/vllm
+
+  Qwen/Qwen3.8-Flash-Next                    see model card ("other")
+  https://huggingface.co/Qwen/Qwen3.8-Flash-Next
+  Source of the official BF16 MTP head.
+
+  nvidia/Qwen3.8-Flash-Next-NVFP4            see model card
+  https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4
+  Source of the NVFP4 main weights.
+
+  dicksondickson/Qwen3.8-Flash-Next-NVFP4-reshard-mtp-fix    MIT
+  https://huggingface.co/dicksondickson/Qwen3.8-Flash-Next-NVFP4-reshard-mtp-fix
+  The checkpoint this recipe actually serves.
+
+  Prometheus                                 Apache-2.0
+  Grafana                                    AGPL-3.0

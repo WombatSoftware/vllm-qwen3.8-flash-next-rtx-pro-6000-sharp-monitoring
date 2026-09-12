@@ -1,0 +1,15 @@
+# File-based dashboard provisioning: JSON files in /var/lib/grafana/dashboards
+# are (re)loaded from the bind mount, so edits on the host show up here.
+apiVersion: 1
+
+providers:
+  - name: vllm
+    orgId: 1
+    folder: vLLM
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

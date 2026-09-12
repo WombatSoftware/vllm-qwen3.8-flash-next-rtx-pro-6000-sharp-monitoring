@@ -1,0 +1,23 @@
+# Prometheus scrape configuration for the vLLM - Qwen3.8-Flash-Next recipe.
+#
+# vLLM serves Prometheus metrics on /metrics by default -- no extra engine flag
+# is needed. Do not pass --disable-log-stats: it stops the stat loggers that
+# feed these metrics, leaving /metrics with HTTP-instrumentation metrics only.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # vLLM engine metrics (vllm:* + http_* from the FastAPI instrumentator).
+  - job_name: vllm
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["qwen-3-8-flash-next:8000"]
+        labels:
+          instance: qwen-3-8-flash-next
+
+  # Prometheus itself, so the scrape/target health of Prometheus is visible.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

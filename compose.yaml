@@ -1,0 +1,226 @@
+# Opinionated vLLM recipe: Qwen3.8-Flash-Next on a single RTX PRO 6000 Blackwell,
+# with the Qwen-Sharp chat template and a local Prometheus + Grafana stack.
+#
+# Every non-obvious flag below is explained, and the numbers quoted come from
+# docs/benchmarks.md (7-variant llama-benchy sweep, 3 runs per cell). If you
+# change a flag, re-run the sweep -- several of these interact.
+#
+# Paths are configurable via .env (copy .env.example). MODELS_DIR must contain
+# the checkpoint at $MODELS_DIR/dicksondickson/Qwen3.8-Flash-Next-NVFP4-reshard-mtp-fix.
+
+services:
+  qwen-3-8-flash-next:
+    # Built locally by ./Dockerfile -- see README "Build the image". The tag sits
+    # in the upstream vllm/ namespace but is NOT an upstream image, hence
+    # pull_policy: never. A stray `docker pull` would try to replace it.
+    # Prefer the @sha256 digest form once your build is final: tags are mutable.
+    image: local/vllm-openai:qwen4-eaglefix-eed1f3d0
+    pull_policy: never
+    container_name: qwen-3-8-flash-next
+
+    # restart: always + healthcheck does NOT restart on unhealthy, only on exit.
+    # A real crash loop reloads the 47.7 GiB PLE table every cycle -- watch the
+    # container restart count before assuming the engine is merely slow to boot.
+    restart: always
+    # vLLM's default is 10 s before SIGKILL; a recreate mid-generation would drop
+    # in-flight agent turns. 60 s lets the scheduler drain.
+    stop_grace_period: 60s
+    shm_size: 16gb
+    ipc: host
+    ulimits:
+      memlock: -1
+    ports:
+      - "${VLLM_BIND:-127.0.0.1}:${VLLM_PORT:-8000}:8000"
+    environment:
+      PYTORCH_ALLOC_CONF: "expandable_segments:True"
+      # Build JIT targets (FlashInfer, torch.compile) for Blackwell only instead
+      # of the image's full arch list. 12.0f == sm_120 family (RTX PRO 6000).
+      TORCH_CUDA_ARCH_LIST: "12.0f"
+      HF_TOKEN: "${HF_TOKEN:-}"
+    volumes:
+      - ${HF_CACHE_DIR:-~/.cache/huggingface}:/root/.cache/huggingface
+      # Kernel/compile caches persisted across container recreates. Without these
+      # every `compose up` after an image change re-JITs FlashInfer and rebuilds
+      # the torch.compile cache.
+      - ${VLLM_CACHE_DIR:-~/.cache/vllm}:/root/.cache/vllm
+      - ${TORCH_CACHE_DIR:-~/.cache/torch}:/root/.cache/torch
+      - ${FLASHINFER_CACHE_DIR:-~/.cache/flashinfer}:/root/.cache/flashinfer
+      # Checkpoint lives outside the HF hub cache (downloaded with --local-dir);
+      # mounted read-only so the engine can never rewrite shards.
+      - ${MODELS_DIR:-./models}:/models:ro
+      - ./chat_template.jinja:/opt/vllm/chat_template.jinja:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Cold start (first ever boot, empty caches) can take ~30 min. Warm-cache
+      # boots on this config measure 127-146 s.
+      start_period: 1800s
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+    command: >
+      /models/dicksondickson/Qwen3.8-Flash-Next-NVFP4-reshard-mtp-fix
+      --served-model-name qwen-3-8-flash-next
+      --port 8000 --host 0.0.0.0
+      --quantization modelopt
+      --engram-config '{"cpu_offload": true}'
+      --tensor-parallel-size 1
+      --gpu-memory-utilization 0.96
+      --enable-prefix-caching
+      --max-num-seqs 12
+      --max-num-batched-tokens 8192
+      --long-prefill-token-threshold 4096
+      --max-model-len 262144
+      --kv-cache-dtype auto
+      --trust-remote-code
+      --enable-auto-tool-choice
+      --reasoning-parser qwen3
+      --tool-call-parser qwen3_xml
+      --speculative-config '{"method": "mtp", "num_speculative_tokens": 3}'
+      --chat-template /opt/vllm/chat_template.jinja
+
+    # ---------------------------------------------------------------------
+    # Why these values (all measured -- see docs/benchmarks.md)
+    #
+    # --engram-config '{"cpu_offload": true}'
+    #   Pins the 47.7 GiB FP8 PLE n-gram table in host RAM; the GPU reads rows
+    #   over UVA on a side stream. Without it the checkpoint cannot load on a
+    #   96 GB card. This is in-process, so there is no offload worker, no IPC
+    #   socket, and no need for a forced mp executor or cap_add SYS_PTRACE.
+    #   Needs vLLM with PR #54371 (see Dockerfile). VLLM_PLE_CPU_OFFLOAD is a
+    #   deprecated shim and VLLM_PLE_OFFLOAD_READY_TIMEOUT no longer exists.
+    #
+    # --gpu-memory-utilization 0.96
+    #   Yields a 269,228-token KV pool = 1.03x headroom over ONE max-length
+    #   request. That margin is the binding constraint on this box: anything
+    #   that reserves more GPU memory will fail to start.
+    #
+    # --max-num-seqs 12
+    #   The model card suggests 2 as a 96 GB precaution. That serialises 4-way
+    #   concurrency into two slots and caps agent fan-out. KV lives in only a
+    #   quarter of the layers, so the per-seq budget is cheap here.
+    #
+    # --max-num-batched-tokens 8192 / --long-prefill-token-threshold 4096
+    #   DO NOT RAISE on this GPU. 16384/8192 was benchmarked and the engine
+    #   refuses to start: the larger activation workspace drops the KV pool to
+    #   5.61 GiB against the 7.41 GiB one 262144-token sequence needs. The
+    #   threshold caps each prefill's per-step token count so a long prompt
+    #   takes at most half a step and decodes interleave, which is what keeps
+    #   4-way deep-context latency sane.
+    #   (--max-num-partial-prefills is a V0-era knob, unsupported on V1 and gone
+    #   from this CLI. Do not re-add it.)
+    #
+    # --speculative-config num_speculative_tokens 3
+    #   MTP-3, not MTP-2. Measured mean acceptance length 2.695 and all three
+    #   draft tokens accepted in 35.8% of verify steps -- the modal outcome.
+    #   Worth +16% single-stream decode. It costs 10-35% on the concurrent
+    #   context-load rows, so drop to 2 if 4-way fan-out matters more to you
+    #   than single-stream latency. Removing spec-decode entirely costs 40% of
+    #   single-stream decode but GAINS 47% on prefill (the draft head is pure
+    #   overhead during prefill).
+    #
+    # FlashInfer autotune is ON (i.e. --no-enable-flashinfer-autotune is
+    #   deliberately absent, despite being a model-card default). It is higher
+    #   on 23 of 28 benchmark rows. It costs ~20-30 s of startup that RECURS
+    #   every boot -- ~/.cache/flashinfer does not grow, so the tuning is redone
+    #   per start rather than persisted.
+    #
+    # --kv-cache-dtype auto
+    #   fp8 is the next experiment, not yet benchmarked here. 4-way concurrency
+    #   at 131k depth collapses to single-digit aggregate t/s, which is KV
+    #   budget rather than compute, so fp8 is the obvious next lever.
+    #
+    # Keep --disable-log-stats OUT: it stops the stat loggers that feed the
+    #   vllm:* Prometheus metrics the Grafana dashboard is built on.
+    # ---------------------------------------------------------------------
+
+  # Prometheus and Grafana publish on 127.0.0.1 by default, so they are reachable
+  # only from the host running compose. To reach them from another machine either
+  # tunnel:   ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 <gpu-host>
+  # or set GRAFANA_BIND / PROMETHEUS_BIND to 0.0.0.0 in .env -- which exposes an
+  # unauthenticated Prometheus and a password-only Grafana. Prefer the tunnel.
+  prometheus:
+    image: docker.io/prom/prometheus:v3.14.0
+    container_name: qwen-3-8-flash-next-prometheus
+    restart: always
+    ports:
+      - "${PROMETHEUS_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command: >
+      --config.file=/etc/prometheus/prometheus.yml
+      --storage.tsdb.path=/prometheus
+      --storage.tsdb.retention.time=30d
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # Datasource and dashboards are provisioned from ./monitoring/grafana, so
+  # nothing has to be imported by hand. The dashboard's $model_name variable is
+  # resolved from label_values(model_name), so renaming --served-model-name needs
+  # no dashboard edit. Do not reintroduce hardcoded model_name literals into
+  # panel queries; they silently show No-data on every rename.
+  #
+  # GRAFANA_ADMIN_PASSWORD only seeds the password when the grafana-data volume
+  # is FIRST created. Rotating it later needs:
+  #   docker exec qwen-3-8-flash-next-grafana grafana cli admin reset-admin-password '<new>'
+  # Five failed logins then lock the account for five minutes, during which the
+  # UI insists the password is wrong.
+  grafana:
+    image: docker.io/grafana/grafana:13.2.0
+    container_name: qwen-3-8-flash-next-grafana
+    restart: always
+    ports:
+      - "${GRAFANA_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/vllm-qwen-3-8-flash-next.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+volumes:
+  prometheus-data:
+  grafana-data:

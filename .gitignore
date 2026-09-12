@@ -1,0 +1,12 @@
+# Holds GRAFANA_ADMIN_PASSWORD and optionally HF_TOKEN. Never commit it.
+.env
+
+# Local model checkout, if you point MODELS_DIR at ./models
+/models/
+
+# Benchmark output
+/bench-results/
+
+# OS metadata
+.DS_Store
+._*
