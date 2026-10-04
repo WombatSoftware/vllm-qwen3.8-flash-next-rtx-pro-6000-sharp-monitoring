@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Report measured speculative-decoding acceptance for one request.
 #
-# Requires the engine to run with:  --per-request-spec-decode-metrics detailed
-# (or `summary`). It is NOT enabled by default in compose.yaml -- it is an
-# experimental response field, so add it temporarily when you want to measure.
+# Requires the engine to run with --per-request-spec-decode-metrics.
+# compose.yaml ships `summary`; if the per-step histogram comes back empty,
+# switch to `detailed` temporarily to get it.
 #
 # Note the flag takes a value (none|summary|detailed); passing it bare fails.
 set -uo pipefail

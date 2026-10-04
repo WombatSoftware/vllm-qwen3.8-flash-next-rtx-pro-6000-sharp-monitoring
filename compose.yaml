@@ -2,19 +2,35 @@
 # with the Qwen-Sharp chat template and a local Prometheus + Grafana stack.
 #
 # Every non-obvious flag below is explained, and the numbers quoted come from
-# docs/benchmarks.md (7-variant llama-benchy sweep, 3 runs per cell). If you
-# change a flag, re-run the sweep -- several of these interact.
+# docs/benchmarks.md (llama-benchy sweeps, 3 runs per cell). If you change a
+# flag, re-run the sweep -- several of these interact -- and run it through
+# ./scripts/bench-guard.sh: an unguarded sweep on a shared engine is
+# uninterpretable (docs/benchmarks.md, "Benchmark isolation").
 #
 # Paths are configurable via .env (copy .env.example). MODELS_DIR must contain
 # the checkpoint at $MODELS_DIR/dicksondickson/Qwen3.8-Flash-Next-NVFP4-reshard-mtp-fix.
 
 services:
   qwen-3-8-flash-next:
-    # Built locally by ./Dockerfile -- see README "Build the image". The tag sits
-    # in the upstream vllm/ namespace but is NOT an upstream image, hence
-    # pull_policy: never. A stray `docker pull` would try to replace it.
-    # Prefer the @sha256 digest form once your build is final: tags are mutable.
-    image: local/vllm-openai:qwen4-eaglefix-eed1f3d0
+    # Bare upstream nightly, pinned by its FULL-SHA tag. Nothing is built
+    # locally any more: the one-function eagle-gate overlay this recipe used to
+    # carry was retired once PR #55390 replaced the model-type gate with
+    # positional draft-group annotation (README "Why a nightly").
+    # A sha-addressed tag is immutable, so with pull_policy: never a compose
+    # recreate can never silently move the base. Pull it once by hand (README
+    # step 2).
+    #
+    # Re-pin rule when moving to a newer nightly: the base must contain
+    # PR #59621. Check inside the image that
+    #   grep -rn indexed_attention <site-packages>/vllm/models/qwen4_exp/
+    # HITS. Bases between #57387 and #59621 (e.g. nightly-0cbac6cd, 2026-10-02)
+    # die on every boot with `ValueError: Invalid layer_type indexed_attention`
+    # before weight load (vllm#59756).
+    #
+    # Why a nightly and not the v0.30.0 release: v0.30.0 predates the fp8-QSA
+    # sm_120 kernels (#55557), the hermes parser fix (#56635) and the
+    # spec-decode correctness chain (#56734, #57885), all load-bearing here.
+    image: vllm/vllm-openai:nightly-18f8f96025b556071eb627076f94df560fbd3a22
     pull_policy: never
     container_name: qwen-3-8-flash-next
 
@@ -67,8 +83,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      # Cold start (first ever boot, empty caches) can take ~30 min. Warm-cache
-      # boots on this config measure 127-146 s.
+      # Cold start (first ever boot, empty caches) can take ~30 min. A warm-cache
+      # boot on this config measures about 150 s.
       start_period: 1800s
     logging:
       driver: json-file
@@ -86,12 +102,13 @@ services:
       --gpu-memory-utilization 0.96
       --enable-prefix-caching
       --max-num-seqs 12
-      --max-num-batched-tokens 8192
-      --long-prefill-token-threshold 4096
+      --max-num-batched-tokens 16384
+      --long-prefill-token-threshold 8192
       --max-model-len 262144
-      --kv-cache-dtype auto
+      --kv-cache-dtype fp8
       --trust-remote-code
       --enable-auto-tool-choice
+      --per-request-spec-decode-metrics summary
       --reasoning-parser qwen3
       --tool-call-parser qwen3_xml
       --speculative-config '{"method": "mtp", "num_speculative_tokens": 3}'
@@ -105,28 +122,35 @@ services:
     #   over UVA on a side stream. Without it the checkpoint cannot load on a
     #   96 GB card. This is in-process, so there is no offload worker, no IPC
     #   socket, and no need for a forced mp executor or cap_add SYS_PTRACE.
-    #   Needs vLLM with PR #54371 (see Dockerfile). VLLM_PLE_CPU_OFFLOAD is a
-    #   deprecated shim and VLLM_PLE_OFFLOAD_READY_TIMEOUT no longer exists.
+    #   The table shows up as container memory, not as a separate process.
+    #   This flag is the only switch: the VLLM_PLE_CPU_OFFLOAD env shim was
+    #   deleted upstream (#57937) and VLLM_PLE_OFFLOAD_READY_TIMEOUT is gone.
     #
     # --gpu-memory-utilization 0.96
-    #   Yields a 269,228-token KV pool = 1.03x headroom over ONE max-length
-    #   request. That margin is the binding constraint on this box: anything
-    #   that reserves more GPU memory will fail to start.
+    #   With fp8 KV and the batch pair below, a healthy boot reports a
+    #   341,041-token KV pool = 1.30x one max-length request. Anything that
+    #   reserves more GPU memory still needs a boot check before you trust it.
+    #   Known boot risk at 0.96: the first boot can lose a CUDA-OOM lottery in
+    #   the fused-MoE autotune (seen once on nightly-ac68c308; the retry booted
+    #   clean). restart: always masks it at the cost of one extra boot. If it
+    #   ever loops, step down to 0.955 before touching anything else.
     #
     # --max-num-seqs 12
     #   The model card suggests 2 as a 96 GB precaution. That serialises 4-way
     #   concurrency into two slots and caps agent fan-out. KV lives in only a
     #   quarter of the layers, so the per-seq budget is cheap here.
     #
-    # --max-num-batched-tokens 8192 / --long-prefill-token-threshold 4096
-    #   DO NOT RAISE on this GPU. 16384/8192 was benchmarked and the engine
-    #   refuses to start: the larger activation workspace drops the KV pool to
-    #   5.61 GiB against the 7.41 GiB one 262144-token sequence needs. The
-    #   threshold caps each prefill's per-step token count so a long prompt
-    #   takes at most half a step and decodes interleave, which is what keeps
-    #   4-way deep-context latency sane.
-    #   (--max-num-partial-prefills is a V0-era knob, unsupported on V1 and gone
-    #   from this CLI. Do not re-add it.)
+    # --max-num-batched-tokens 16384 / --long-prefill-token-threshold 8192
+    #   The threshold is half the batch budget: it caps each prefill's per-step
+    #   token count so a long prompt takes at most half a step and decodes
+    #   interleave. This pair REFUSED TO BOOT with --kv-cache-dtype auto (5.61
+    #   GiB of KV against the 7.41 GiB one 262144-token sequence needs); with
+    #   fp8 KV it boots, and against 8192/4096 it measured +2.4-8.3% on every
+    #   depth-c1 prefill row and +28-61% on mid-depth c4 decode. The price is
+    #   pool: 341k tokens instead of 468k. That only matters for 4-way at 131k
+    #   depth, which wants 524k and fit in neither.
+    #   (--max-num-partial-prefills is a V0-era knob, gone from this CLI. Do
+    #   not re-add it.)
     #
     # --speculative-config num_speculative_tokens 3
     #   MTP-3, not MTP-2. Measured mean acceptance length 2.695 and all three
@@ -136,6 +160,16 @@ services:
     #   than single-stream latency. Removing spec-decode entirely costs 40% of
     #   single-stream decode but GAINS 47% on prefill (the draft head is pure
     #   overhead during prefill).
+    #   The draft groups claim real KV pool, so the boot-line pool size is only
+    #   comparable between boots with the same speculative config.
+    #
+    # --per-request-spec-decode-metrics summary
+    #   Reports acceptance per request in the usage chunk. Its cost sits inside
+    #   benchmark noise. It stays on because it is the cheapest proof that MTP
+    #   is actually active: an engine that has silently lost its
+    #   --speculative-config still boots, still answers, and still passes a
+    #   tool-call smoke test. (Also check the init line for
+    #   speculative_config=SpeculativeConfig(method='mtp', ...), not None.)
     #
     # FlashInfer autotune is ON (i.e. --no-enable-flashinfer-autotune is
     #   deliberately absent, despite being a model-card default). It is higher
@@ -143,10 +177,13 @@ services:
     #   every boot -- ~/.cache/flashinfer does not grow, so the tuning is redone
     #   per start rather than persisted.
     #
-    # --kv-cache-dtype auto
-    #   fp8 is the next experiment, not yet benchmarked here. 4-way concurrency
-    #   at 131k depth collapses to single-digit aggregate t/s, which is KV
-    #   budget rather than compute, so fp8 is the obvious next lever.
+    # --kv-cache-dtype fp8
+    #   Needs fp8_e4m3 KV on the QSA path (PR #55557). It moves the pool-bound
+    #   cells hugely -- at 131k depth and 4-way, context decode 3.78 -> 13.20
+    #   t/s and context prefill 6,244 -> 10,874 t/s -- and leaves single-stream
+    #   decode within noise. It is not free: the QSA-compute-bound cells pay for
+    #   the fp8 kernel (tg128 @ d32768 c4 363.7 -> 244.7 when first measured,
+    #   ~274 now; pp2048 @ dN c1 down 20-36%). See docs/benchmarks.md.
     #
     # Keep --disable-log-stats OUT: it stops the stat loggers that feed the
     #   vllm:* Prometheus metrics the Grafana dashboard is built on.
@@ -158,7 +195,7 @@ services:
   # or set GRAFANA_BIND / PROMETHEUS_BIND to 0.0.0.0 in .env -- which exposes an
   # unauthenticated Prometheus and a password-only Grafana. Prefer the tunnel.
   prometheus:
-    image: docker.io/prom/prometheus:v3.14.0
+    image: docker.io/prom/prometheus:v3.15.0
     container_name: qwen-3-8-flash-next-prometheus
     restart: always
     ports:
@@ -194,7 +231,7 @@ services:
   # Five failed logins then lock the account for five minutes, during which the
   # UI insists the password is wrong.
   grafana:
-    image: docker.io/grafana/grafana:13.2.0
+    image: docker.io/grafana/grafana:13.2.3
     container_name: qwen-3-8-flash-next-grafana
     restart: always
     ports:
