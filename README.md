@@ -26,7 +26,7 @@ This is not a neutral starting point. It makes these calls for you:
   acceptance data.
 - **FlashInfer autotune on**, against the model card default.
 - **Monitoring is not optional** — Prometheus and Grafana come up with the
-  engine, with a 24-panel dashboard provisioned.
+  engine, with a 28-panel dashboard provisioned, including GPU power draw.
 - **Tuned for tool-calling agents**, not for chat.
 
 If you want a plain vLLM deployment, start from vLLM's own docs instead. If you
@@ -112,7 +112,7 @@ Grafana is at <http://127.0.0.1:3000>, Prometheus at <http://127.0.0.1:9090>.
 | Reasoning | Split into `reasoning_content`, with per-request effort control |
 | Speculative decoding | MTP-3, measured 2.695 mean acceptance length, reported per request |
 | KV cache | fp8, 341,041-token pool |
-| Monitoring | Prometheus scraping vLLM, Grafana with a 24-panel dashboard, provisioned |
+| Monitoring | Prometheus scraping vLLM and a GPU exporter, Grafana with a 28-panel dashboard in 8 rows, provisioned |
 
 Single-stream decode is flat at roughly **133-166 t/s from 0 to 131k context**.
 Four-way concurrency reaches **274 t/s aggregate at 32k** and 363 at 8k. Full
@@ -221,6 +221,8 @@ This recipe is glue. The work is other people's.
   NVFP4 quantisation the checkpoint is built from.
 - **[Prometheus](https://prometheus.io/)** and
   **[Grafana](https://grafana.com/)** — the monitoring stack.
+- **[nvidia_gpu_exporter](https://github.com/utkuozdemir/nvidia_gpu_exporter)**
+  — GPU power, temperature and VRAM metrics.
 - **[llama-benchy](https://pypi.org/project/llama-benchy/)** — the benchmark
   harness every number here came from.
 
@@ -231,6 +233,6 @@ None of the above endorse this repository.
 [Apache-2.0](LICENSE) for the configuration, documentation and scripts.
 
 `chat_template.jinja` is redistributed unmodified under its own Apache-2.0
-licence from peculiar-ragdoll / froggeric. Model weights, vLLM, Prometheus and
-Grafana are **not** redistributed here and remain under their own licences.
-See [`NOTICE`](NOTICE) for the full attribution.
+licence from peculiar-ragdoll / froggeric. Model weights, vLLM, Prometheus,
+Grafana and nvidia_gpu_exporter are **not** redistributed here and remain under
+their own licences. See [`NOTICE`](NOTICE) for the full attribution.

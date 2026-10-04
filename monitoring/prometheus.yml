@@ -21,3 +21,11 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # GPU telemetry (power draw/limit W, temperature, VRAM) from the NVML exporter
+  # (compose service gpu-exporter). Its metric prefix is nvidia_smi_*.
+  - job_name: gpu
+    static_configs:
+      - targets: ["gpu-exporter:9835"]
+        labels:
+          instance: gpu0

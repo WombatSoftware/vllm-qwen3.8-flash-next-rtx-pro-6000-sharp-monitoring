@@ -189,6 +189,37 @@ services:
     #   vllm:* Prometheus metrics the Grafana dashboard is built on.
     # ---------------------------------------------------------------------
 
+  # GPU telemetry for the dashboard's GPU row. One card does not warrant
+  # dcgm-exporter, so this is utkuozdemir/nvidia_gpu_exporter; the -nvml tag
+  # reads NVML in-process instead of forking nvidia-smi per scrape. It serves
+  # nvidia_smi_power_draw_watts / nvidia_smi_power_limit_watts, temperature and
+  # VRAM on :9835 inside the compose network (not published on the host),
+  # scraped by the gpu job in monitoring/prometheus.yml.
+  # NVML readers open no compute context, so sharing the GPU with the engine
+  # costs no VRAM and does not show up in
+  # `nvidia-smi --query-compute-apps`.
+  # No healthcheck: the image is a static binary with no shell. The Prometheus
+  # target is the health signal.
+  gpu-exporter:
+    image: docker.io/utkuozdemir/nvidia_gpu_exporter:1.15.1-nvml
+    container_name: qwen-3-8-flash-next-gpu-exporter
+    restart: always
+    environment:
+      # utility = NVML access only; the exporter needs no compute capability.
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
   # Prometheus and Grafana publish on 127.0.0.1 by default, so they are reachable
   # only from the host running compose. To reach them from another machine either
   # tunnel:   ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 <gpu-host>
