@@ -18,15 +18,15 @@ This is not a neutral starting point. It makes these calls for you:
   NVFP4 main weights with the official BF16 MTP head, not the FP8 one.
 - **A specific chat template** — the vendored Qwen-Sharp v22.5.0, deliberately
   *not* the one shipped inside the checkpoint.
-- **A pinned nightly engine** — a bare upstream vLLM nightly, pinned by full
-  commit sha, because the current release is missing kernels and fixes this
-  config depends on.
+- **A pinned release engine** — the bare upstream vLLM v0.33.0 image, pinned
+  by digest, because older releases miss kernels and fixes this config
+  depends on.
 - **fp8 KV cache and a 16384-token batch budget**, which only boot together.
 - **MTP-3 speculative decoding**, against the common advice of 2, on measured
   acceptance data.
 - **FlashInfer autotune on**, against the model card default.
 - **Monitoring is not optional** — Prometheus and Grafana come up with the
-  engine, with a 28-panel dashboard provisioned, including GPU power draw.
+  engine, with a 30-panel dashboard provisioned, including GPU power and thermals.
 - **Tuned for tool-calling agents**, not for chat.
 
 If you want a plain vLLM deployment, start from vLLM's own docs instead. If you
@@ -43,7 +43,7 @@ have this GPU and want something that works on the first boot, start here.
 | Disk | ~130 GB for the checkpoint. |
 | Software | Docker with Compose v2 and the NVIDIA Container Toolkit. |
 
-The KV pool ends up at **341,041 tokens = 1.30x** a single max-length request.
+The KV pool ends up at **401,790 tokens = 1.53x** a single max-length request.
 That margin is the defining constraint of this box; see
 [`docs/benchmarks.md`](docs/benchmarks.md#hard-constraints-on-this-gpu).
 
@@ -68,11 +68,12 @@ outside your HF hub cache; `compose.yaml` mounts it read-only.
 **2. Pull the engine image** on the GPU host:
 
 ```bash
-docker pull vllm/vllm-openai:nightly-18f8f96025b556071eb627076f94df560fbd3a22
+docker pull vllm/vllm-openai:v0.33.0@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e
 ```
 
 `compose.yaml` uses `pull_policy: never`, so this step is not optional. The
-pin moves only when you move it. See [Why a nightly](#why-a-nightly).
+pin moves only when you move it. See [Why v0.33.0](#why-v0330). The image is
+CUDA 13 only; the host driver must support CUDA 13.
 
 **3. Start everything:**
 
@@ -82,7 +83,7 @@ until curl -sf -o /dev/null http://127.0.0.1:8000/health; do sleep 5; done
 ```
 
 First boot with empty caches can take ~30 minutes (weight load, FlashInfer JIT,
-torch.compile). Subsequent boots take **about 150 s** — the caches are
+torch.compile). Subsequent boots take **about 180 s** — the caches are
 bind-mounted so they survive recreates.
 
 **4. Check it:**
@@ -92,7 +93,7 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"qwen-3-8-flash-next",
        "messages":[{"role":"user","content":"What is 17 times 23?"}],
-       "max_tokens":300}' | jq -r '.choices[0].message.content'
+       "max_tokens":512}' | jq -r '.choices[0].message.content'
 ```
 
 Grafana is at <http://127.0.0.1:3000>, Prometheus at <http://127.0.0.1:9090>.
@@ -111,11 +112,11 @@ Grafana is at <http://127.0.0.1:3000>, Prometheus at <http://127.0.0.1:9090>.
 | Tool calling | Auto tool choice with Qwen XML tool blocks parsed into `tool_calls` |
 | Reasoning | Split into `reasoning_content`, with per-request effort control |
 | Speculative decoding | MTP-3, measured 2.695 mean acceptance length, reported per request |
-| KV cache | fp8, 341,041-token pool |
-| Monitoring | Prometheus scraping vLLM and a GPU exporter, Grafana with a 28-panel dashboard in 8 rows, provisioned |
+| KV cache | fp8, 401,790-token pool |
+| Monitoring | Prometheus scraping vLLM and a GPU exporter, Grafana with a 30-panel dashboard in 8 rows, provisioned |
 
-Single-stream decode is flat at roughly **133-166 t/s from 0 to 131k context**.
-Four-way concurrency reaches **274 t/s aggregate at 32k** and 363 at 8k. Full
+Single-stream decode is flat at roughly **139-164 t/s from 0 to 131k context**.
+Four-way concurrency reaches **358 t/s aggregate at 32k** and 347 at 8k. Full
 numbers, and the regression this config accepts, are in
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
@@ -129,10 +130,10 @@ numbers, and the regression this config accepts, are in
   humans) changing this repo.
 - `compose.yaml` — every non-obvious flag is explained inline with its reason.
 
-## Why a nightly
+## Why v0.33.0
 
-The image is a bare upstream nightly, pinned by full commit sha. No release
-will do yet:
+The image is the bare upstream v0.33.0 release, pinned by manifest-list
+digest. Older releases will not do:
 
 - **v0.29.0 cannot load this checkpoint.** It ships the model (PR #53896) but
   has no PLE offload path, so the 47.7 GiB FP8 table has nowhere to live on a
@@ -140,26 +141,31 @@ will do yet:
 - **v0.30.0 can, but predates what this config runs on**: the fp8 QSA kernels
   for this GPU (PR #55557), a tool-call parser fix (PR #56635) and the
   speculative-decoding correctness fixes (PRs #56734, #57885).
+- **v0.32.0 boots and benchmarks fine** but misses the PLE fixes #61454 and
+  #61601. v0.33.0 carries them, plus lookahead block hashes for MTP prefix
+  caching (PR #61589, on by default), which is the likely cause of the
+  doubled prefill-at-depth rows in [`docs/benchmarks.md`](docs/benchmarks.md#engine-base).
 
-Earlier versions of this recipe built a local image with a one-function
-overlay on `kv_cache_utils.py`, because without it cross-request prefix-cache
-reuse was silently disabled for this model. Upstream replaced that code path
-with positional draft-group annotation (PR #55390), the overlay became
-unnecessary, and the `Dockerfile` is gone.
+Earlier versions of this recipe ran upstream nightlies pinned by full-sha tag,
+and before that built a local image with a one-function overlay on
+`kv_cache_utils.py`, because without it cross-request prefix-cache reuse was
+silently disabled for this model. Upstream replaced that code path with
+positional draft-group annotation (PR #55390), the overlay became unnecessary,
+and the `Dockerfile` is gone.
 
-**Moving the pin.** Not every nightly boots. `0cbac6cd` (2026-10-02) died on
-every start with `ValueError: Invalid layer_type indexed_attention`
+**Moving the pin.** Not every base boots. `nightly-0cbac6cd` (2026-10-02) died
+on every start with `ValueError: Invalid layer_type indexed_attention`
 (vllm#59756, fixed by PR #59621). Before pinning a newer base, check it
 contains the fix:
 
 ```bash
-docker run --rm --entrypoint bash vllm/vllm-openai:nightly-<sha> -c \
+docker run --rm --entrypoint bash vllm/vllm-openai:<tag>@<digest> -c \
   'grep -rn indexed_attention /usr/local/lib/python3.12/dist-packages/vllm/models/qwen4_exp/'
 ```
 
 Then boot it, confirm the KV pool line and `speculative_config` in the log, and
 re-run the sweep before trusting it. Keep the previous image until the sweep
-passes.
+passes. Pin by digest (`tag@sha256:...`): release tags can be re-pushed.
 
 ## The chat template
 

@@ -151,13 +151,13 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
 
 From `docs/benchmarks.md`, on this GPU:
 
-- Four concurrent agents at up to 32k context each is comfortable: 274 t/s
-  aggregate, roughly 70 t/s per agent. At 8k it is 363 t/s aggregate.
-- Four concurrent agents at 131k context is **not viable**: 15.86 t/s
-  aggregate. Four 131k requests need 524,288 KV tokens against a 341,041-token
+- Four concurrent agents at up to 32k context each is comfortable: 358 t/s
+  aggregate, roughly 90 t/s per agent. At 8k it is 347 t/s aggregate.
+- Four concurrent agents at 131k context is **not viable**: 11.92 t/s
+  aggregate. Four 131k requests need 524,288 KV tokens against a 401,790-token
   pool, so they cannot coexist and the scheduler preempts. Cap agent context
   well below 131k, or run fewer of them.
-- Single-stream decode is flat at ~133-166 t/s from 0 to 131k context, so one
+- Single-stream decode is flat at ~139-164 t/s from 0 to 131k context, so one
   deep agent is fine. It is the *combination* of deep and concurrent that fails.
 
 `--max-num-seqs 12` is an admission budget, not a promise: twelve deep requests

@@ -12,12 +12,12 @@ not as a claim about Qwen3.8-Flash-Next in general.
 | | |
 |---|---|
 | GPU | NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition, 96 GB |
-| Driver | 610.57.04, CUDA UMD 13.3 |
+| Driver | 615.71.09 (CUDA 13; v0.33.0 images are CUDA 13 only) |
 | Host RAM | 244 GiB (the PLE table needs ~48 GiB pinned) |
 | Checkpoint | `dicksondickson/Qwen3.8-Flash-Next-NVFP4-reshard-mtp-fix` |
-| Engine | vLLM nightly `18f8f96025` (the pin in `compose.yaml`), bare upstream image, no overlay |
+| Engine | vLLM v0.33.0 (the digest pin in `compose.yaml`), bare upstream image, no overlay |
 | Tool | llama-benchy 0.4.0, 3 runs per cell, under `scripts/bench-guard.sh` |
-| Date | 2026-10-04 (guard verdict PASS, one self-preemption note, zero restarts) |
+| Date | 2026-11-02 (guard verdict PASS, one self-preemption note, zero restarts) |
 
 Note the **Max-Q**: this card is power-capped at 300 W. A full-power
 RTX PRO 6000 will post higher numbers.
@@ -42,53 +42,55 @@ on top of that loaded context.
 ## Results
 
 Aggregate throughput, mean of 3 runs with run-to-run standard deviation.
-Measured generation latency: **74.05 ms**.
+Measured generation latency: **70.99 ms**.
 
 | test | t/s (total) |
 |---|---:|
-| pp2048 (c1) | 20,457.64 ±449.75 |
-| tg128 (c1) | 156.06 ±17.52 |
-| pp2048 (c4) | 12,875.31 ±76.09 |
-| tg128 (c4) | 400.03 ±11.85 |
-| ctx_pp @ d8192 (c1) | 13,485.14 ±40.19 |
-| ctx_tg @ d8192 (c1) | 154.50 ±11.77 |
-| pp2048 @ d8192 (c1) | 3,886.74 ±16.61 |
-| tg128 @ d8192 (c1) | 149.56 ±6.74 |
-| ctx_pp @ d8192 (c4) | 13,130.86 ±81.91 |
-| ctx_tg @ d8192 (c4) | 256.33 ±30.10 |
-| pp2048 @ d8192 (c4) | 3,711.19 ±27.99 |
-| tg128 @ d8192 (c4) | 363.01 ±9.49 |
-| ctx_pp @ d32768 (c1) | 12,600.68 ±25.43 |
-| ctx_tg @ d32768 (c1) | 133.35 ±16.13 |
-| pp2048 @ d32768 (c1) | 4,288.20 ±60.40 |
-| tg128 @ d32768 (c1) | 166.14 ±8.55 |
-| ctx_pp @ d32768 (c4) | 12,125.20 ±73.67 |
-| ctx_tg @ d32768 (c4) | 59.56 ±7.98 |
-| pp2048 @ d32768 (c4) | 3,889.87 ±20.76 |
-| tg128 @ d32768 (c4) | 274.24 ±17.10 |
-| ctx_pp @ d131072 (c1) | 11,539.02 ±24.20 |
-| ctx_tg @ d131072 (c1) | 143.55 ±11.39 |
-| pp2048 @ d131072 (c1) | 2,248.69 ±11.93 |
-| tg128 @ d131072 (c1) | 155.08 ±13.39 |
-| ctx_pp @ d131072 (c4) | 10,533.37 ±10.77 |
-| ctx_tg @ d131072 (c4) | 14.45 ±0.36 |
-| pp2048 @ d131072 (c4) | 176.62 ±32.80 |
-| tg128 @ d131072 (c4) | 15.86 ±2.75 |
+| pp2048 (c1) | 20,419.09 ±548.16 |
+| tg128 (c1) | 159.89 ±8.12 |
+| pp2048 (c4) | 11,664.63 ±1,692.91 |
+| tg128 (c4) | 413.33 ±19.89 |
+| ctx_pp @ d8192 (c1) | 14,687.27 ±63.33 |
+| ctx_tg @ d8192 (c1) | 140.88 ±10.03 |
+| pp2048 @ d8192 (c1) | 7,948.43 ±33.49 |
+| tg128 @ d8192 (c1) | 162.32 ±6.13 |
+| ctx_pp @ d8192 (c4) | 12,816.66 ±214.44 |
+| ctx_tg @ d8192 (c4) | 172.84 ±1.65 |
+| pp2048 @ d8192 (c4) | 6,684.01 ±83.03 |
+| tg128 @ d8192 (c4) | 347.42 ±21.14 |
+| ctx_pp @ d32768 (c1) | 12,928.95 ±16.53 |
+| ctx_tg @ d32768 (c1) | 138.63 ±4.44 |
+| pp2048 @ d32768 (c1) | 8,686.73 ±107.77 |
+| tg128 @ d32768 (c1) | 164.08 ±3.08 |
+| ctx_pp @ d32768 (c4) | 12,732.60 ±23.56 |
+| ctx_tg @ d32768 (c4) | 61.43 ±7.42 |
+| pp2048 @ d32768 (c4) | 8,364.80 ±30.80 |
+| tg128 @ d32768 (c4) | 358.19 ±15.46 |
+| ctx_pp @ d131072 (c1) | 12,350.83 ±5.75 |
+| ctx_tg @ d131072 (c1) | 144.41 ±6.22 |
+| pp2048 @ d131072 (c1) | 3,503.82 ±49.50 |
+| tg128 @ d131072 (c1) | 158.75 ±15.35 |
+| ctx_pp @ d131072 (c4) | 10,721.89 ±800.15 |
+| ctx_tg @ d131072 (c4) | 12.81 ±3.00 |
+| pp2048 @ d131072 (c4) | 180.55 ±6.28 |
+| tg128 @ d131072 (c4) | 11.92 ±0.67 |
 
 ### How to read this
 
-- **Single-stream decode holds ~133-166 t/s from 0 to 131k context.** That
+- **Single-stream decode holds ~139-164 t/s from 0 to 131k context.** That
   flatness across depth is the point of the config; `tg128 @ d131072 (c1)` at
-  155.08 is within noise of the shallow figure.
-- **Four-way concurrency holds to 32k** (`tg128 @ d32768 (c4)` 274.24) and
-  then falls off a cliff at 131k (`15.86`). Four 131k requests need 524,288 KV
-  tokens against a 341,041-token pool, so they cannot coexist and the scheduler
+  158.75 is within noise of the shallow figure.
+- **Four-way concurrency holds to 32k** (`tg128 @ d32768 (c4)` 358.19) and
+  then falls off a cliff at 131k (`11.92`). Four 131k requests need 524,288 KV
+  tokens against a 401,790-token pool, so they cannot coexist and the scheduler
   preempts. That is arithmetic, not a fault, and it is why the guard reports
   one preemption per sweep as a note rather than a failure.
-- **Context loading is ~10-13k t/s at every depth**, including 4-way at 131k
-  (`ctx_pp @ d131072 (c4)` 10,533).
-- **Prefill on top of a loaded context is the weak spot.** `pp2048 @ dN (c1)`
-  runs 2,249-4,288 t/s. These are the cells that pay for fp8 KV; see below.
+- **Context loading is ~10.7-14.7k t/s at every depth**, including 4-way at
+  131k (`ctx_pp @ d131072 (c4)` 10,722).
+- **Prefill on top of a loaded context is still the weakest row family**, but
+  v0.33.0 roughly doubled it: `pp2048 @ dN (c1)` runs 3,504-8,687 t/s, up from
+  2,249-4,288 on `18f8f96025`. These are the cells that pay for fp8 KV; see
+  below.
 
 ## What changed since the 2026-09-12 config
 
@@ -108,11 +110,13 @@ move hugely and single-stream rows stay within noise:
 
 It is not free. The QSA-compute-bound cells pay for the fp8 kernel:
 `tg128 @ d32768 (c4)` went 363.7 -> 244.7 and `pp2048 @ dN (c1)` dropped
-20-36%. Later bases recovered part of the first (274.24 above); the second is
-still visible in the table. **This is the regression this config accepts**: it trades prefill on
-top of deep context for a 4-way deep-context path that is slow instead of
-dead. If your workload is single-stream with long incremental prompts, measure
-`auto` for yourself (and take the 8192/4096 batch pair with it; see below).
+20-36%. Later bases recovered most of the first (358.19 above), and v0.33.0
+roughly doubled the second family, but `auto` has not been re-measured on
+v0.33.0, so whether fp8 still costs prefill at depth there is unknown.
+**This is the trade this config accepts**: possibly slower prefill on top of
+deep context for a 4-way deep-context path that is slow instead of dead. If
+your workload is single-stream with long incremental prompts, measure `auto`
+for yourself (and take the 8192/4096 batch pair with it; see below).
 
 **Batch pair 16384/8192** (2026-09-24). Against 8192/4096 on the same base:
 every depth-c1 prefill row +2.4-8.3% (`pp2048 (c1)` 17,556 -> 19,006) and
@@ -127,7 +131,8 @@ across the table, so its cost sits inside the noise.
 
 ## Engine base
 
-The image is a bare upstream nightly now. The eagle-gate overlay earlier
+The image is a bare upstream release now, pinned by digest; earlier pins were
+full-sha nightlies. The eagle-gate overlay earlier
 versions built locally was retired when PR #55390 replaced the model-type gate
 with positional draft-group annotation. Proof that prefix caching survives
 without the overlay: 406,400 of 626,939 prefix-cache queries hit (64.8%) on an
@@ -149,14 +154,29 @@ Base moves that showed up in the numbers:
   `ValueError: Invalid layer_type indexed_attention` (vllm#59756). Fixed by
   PR #59621, which is the floor for any future pin. `compose.yaml` carries the
   one-line check.
-- `18f8f96025` (10-04): the current pin and the table above. Healthy at
-  +150 s with zero restarts, pool 341,041 / 1.30x. No row lost beyond noise against
-  `ac68c308`, and the deep prefill rows gained 1-3% with tight spread
-  (`ctx_pp @ d131072 (c1)` 11,338 -> 11,539, `pp2048 @ d131072 (c1)` 2,182 ->
-  2,249). The c1 decode rows are now mixed-sign against it (-7% to +9%,
-  `tg128 (c1)` 150 -> 156), so the same-signed dip one base earlier reads as
-  run-to-run spread, not a regression. `tg128 @ d131072 (c4)` at 15.86 stays in
-  its 16-20 band.
+- `18f8f96025` (10-04): healthy at +150 s with zero restarts, pool 341,041 /
+  1.30x. No row lost beyond noise against `ac68c308`, and the deep prefill
+  rows gained 1-3% with tight spread (`ctx_pp @ d131072 (c1)` 11,338 ->
+  11,539, `pp2048 @ d131072 (c1)` 2,182 -> 2,249). The c1 decode rows are
+  mixed-sign against it (-7% to +9%, `tg128 (c1)` 150 -> 156), so the
+  same-signed dip one base earlier reads as run-to-run spread, not a
+  regression. `tg128 @ d131072 (c4)` at 15.86 stays in its 16-20 band.
+- `21d93d0d8` (10-06): QSA prefill wins exactly where PR #59533 (QSA projection
+  merge) aims: `ctx_pp @ d131072 (c1)` +3.8%, `ctx_pp @ d32768 (c1)` +1.6%,
+  `ctx_pp @ d32768 (c4)` +2.8%. Pool 348,676 / 1.33x.
+- `fe4df3df0e` (10-12): **rolled back.** No wins, and a same-signed loss
+  cluster on deep-context prefill c1 (`ctx_pp @ d131072 (c1)` -2.8%,
+  `pp2048 @ d32768 (c1)` -3.9%). The suspect, PR #59528, is also in v0.32.0,
+  where the cluster fully inverted, so the cause was never isolated.
+- `v0.32.0` (10-21): first release pin. No row moved beyond 3 sigma against
+  `21d93d0d8`. Pool 358,857 / 1.37x.
+- `v0.33.0` (11-02): the current pin and the table above. Healthy at +180 s,
+  pool 401,790 / 1.53x. No row lost more than 3 sigma against `v0.32.0`; the
+  whole `pp2048 @ dN` family gained 82-110% (`pp2048 @ d8192 (c1)` est. prefill
+  time 528 -> 258 ms), and `ctx_pp (c1)` 2-9%. Tail-block reuse under MTP is
+  exactly what PR #61589 (lookahead block hashes, now default) advertises, but
+  this is one sample. The pool grew 12%, which changes the deep 4-way
+  preemption arithmetic: compare those cells only against sweeps on this pool.
 
 ## Speculative decoding acceptance
 
@@ -200,12 +220,14 @@ was `speculative_config=None` in the engine's init line. After any edit near
 
 ## Hard constraints on this GPU
 
-**The KV pool is 1.30x one max-length request.** A healthy boot reports
-`GPU KV cache size: 341,041 tokens, Maximum concurrency for 262,144 tokens per
-request: 1.30x`. Any change that reserves more GPU memory needs a boot check
-before anything else. The pool figure is only comparable between boots with
-the same speculative config, because the draft groups claim real pool: an
-MTP-less boot of this config reports 983,744 tokens.
+**The KV pool is 1.53x one max-length request.** A healthy v0.33.0 boot
+reports `GPU KV cache size: 401,790 tokens, Maximum concurrency for 262,144
+tokens per request: 1.53x`. Any change that reserves more GPU memory needs a
+boot check before anything else. The pool also moves with the base image
+(341,041 on `18f8f96025`, 358,857 on `v0.32.0`), and boot-to-boot it varies by
+about ±1%, so sub-1% deltas mean nothing. It is only comparable between boots
+with the same speculative config, because the draft groups claim real pool:
+an MTP-less boot on an earlier nightly reported 983,744 tokens.
 
 The 16384 batch budget depends on fp8 KV. With `--kv-cache-dtype auto` it
 leaves 5.61 GiB against the 7.41 GiB one max-length sequence needs and the
@@ -254,4 +276,4 @@ What came out of it:
 - Prefix caching is on for all runs, which is how this recipe is meant to be
   served, but it makes the `ctx_*` rows sensitive to run ordering.
 - The comparison figures in "What changed" come from sweeps on different
-  nightlies than the main table. Read them as deltas, not as absolutes.
+  bases than the main table. Read them as deltas, not as absolutes.

@@ -12,25 +12,29 @@
 
 services:
   qwen-3-8-flash-next:
-    # Bare upstream nightly, pinned by its FULL-SHA tag. Nothing is built
-    # locally any more: the one-function eagle-gate overlay this recipe used to
+    # Bare upstream release, pinned by its manifest-list DIGEST. Nothing is
+    # built locally: the one-function eagle-gate overlay this recipe used to
     # carry was retired once PR #55390 replaced the model-type gate with
-    # positional draft-group annotation (README "Why a nightly").
-    # A sha-addressed tag is immutable, so with pull_policy: never a compose
-    # recreate can never silently move the base. Pull it once by hand (README
-    # step 2).
+    # positional draft-group annotation (README "Why v0.33.0").
+    # A digest is immutable, so with pull_policy: never a compose recreate can
+    # never silently move the base. Pull it once by hand (README step 2).
+    # v0.33.0 images are CUDA 13 only (#62575): the host driver must support
+    # CUDA 13 (measured on 615.71.09).
     #
-    # Re-pin rule when moving to a newer nightly: the base must contain
-    # PR #59621. Check inside the image that
+    # Re-pin rule when moving to a newer base: it must contain PR #59621.
+    # Check inside the image that
     #   grep -rn indexed_attention <site-packages>/vllm/models/qwen4_exp/
     # HITS. Bases between #57387 and #59621 (e.g. nightly-0cbac6cd, 2026-10-02)
     # die on every boot with `ValueError: Invalid layer_type indexed_attention`
     # before weight load (vllm#59756).
     #
-    # Why a nightly and not the v0.30.0 release: v0.30.0 predates the fp8-QSA
+    # Why v0.33.0 and not an older release: v0.30.0 predates the fp8-QSA
     # sm_120 kernels (#55557), the hermes parser fix (#56635) and the
-    # spec-decode correctness chain (#56734, #57885), all load-bearing here.
-    image: vllm/vllm-openai:nightly-18f8f96025b556071eb627076f94df560fbd3a22
+    # spec-decode correctness chain (#56734, #57885); v0.32.0 misses the PLE
+    # fixes #61454/#61601. v0.33.0 carries all of them plus #61589 (lookahead
+    # block hashes for MTP prefix caching, on by default), the likely cause of
+    # the doubled pp2048-at-depth rows (one sample; docs/benchmarks.md).
+    image: vllm/vllm-openai:v0.33.0@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e
     pull_policy: never
     container_name: qwen-3-8-flash-next
 
@@ -84,7 +88,7 @@ services:
       timeout: 10s
       retries: 3
       # Cold start (first ever boot, empty caches) can take ~30 min. A warm-cache
-      # boot on this config measures about 150 s.
+      # boot on this config measures about 180 s on v0.33.0.
       start_period: 1800s
     logging:
       driver: json-file
@@ -127,9 +131,10 @@ services:
     #   deleted upstream (#57937) and VLLM_PLE_OFFLOAD_READY_TIMEOUT is gone.
     #
     # --gpu-memory-utilization 0.96
-    #   With fp8 KV and the batch pair below, a healthy boot reports a
-    #   341,041-token KV pool = 1.30x one max-length request. Anything that
-    #   reserves more GPU memory still needs a boot check before you trust it.
+    #   With fp8 KV and the batch pair below, a healthy v0.33.0 boot reports a
+    #   401,790-token KV pool = 1.53x one max-length request (341,041 / 1.30x
+    #   on nightly-18f8f96025; the base moves it). Anything that reserves more
+    #   GPU memory still needs a boot check before you trust it.
     #   Known boot risk at 0.96: the first boot can lose a CUDA-OOM lottery in
     #   the fused-MoE autotune (seen once on nightly-ac68c308; the retry booted
     #   clean). restart: always masks it at the cost of one extra boot. If it
@@ -147,8 +152,8 @@ services:
     #   GiB of KV against the 7.41 GiB one 262144-token sequence needs); with
     #   fp8 KV it boots, and against 8192/4096 it measured +2.4-8.3% on every
     #   depth-c1 prefill row and +28-61% on mid-depth c4 decode. The price is
-    #   pool: 341k tokens instead of 468k. That only matters for 4-way at 131k
-    #   depth, which wants 524k and fit in neither.
+    #   pool: 341k tokens instead of 468k on the base measured then. That only
+    #   matters for 4-way at 131k depth, which wants 524k and fit in neither.
     #   (--max-num-partial-prefills is a V0-era knob, gone from this CLI. Do
     #   not re-add it.)
     #
