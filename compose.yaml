@@ -10,6 +10,10 @@
 # Paths are configurable via .env (copy .env.example). MODELS_DIR must contain
 # the checkpoint at $MODELS_DIR/dicksondickson/Qwen3.8-Flash-Next-NVFP4-reshard-mtp-fix.
 
+# Fixed project name: volumes (Prometheus history, Grafana state) and the
+# network stay the same whatever directory the repo is cloned into.
+name: qwen-3-8-flash-next
+
 services:
   qwen-3-8-flash-next:
     # Bare upstream release, pinned by its manifest-list DIGEST. Nothing is
@@ -41,7 +45,9 @@ services:
     # restart: always + healthcheck does NOT restart on unhealthy, only on exit.
     # A real crash loop reloads the 47.7 GiB PLE table every cycle -- watch the
     # container restart count before assuming the engine is merely slow to boot.
-    restart: always
+    # On a box whose GPUs other stacks share, set RESTART_POLICY=no in .env so
+    # nothing grabs the card after a reboot.
+    restart: ${RESTART_POLICY:-always}
     # vLLM's default is 10 s before SIGKILL; a recreate mid-generation would drop
     # in-flight agent turns. 60 s lets the scheduler drain.
     stop_grace_period: 60s
@@ -206,9 +212,9 @@ services:
   # No healthcheck: the image is a static binary with no shell. The Prometheus
   # target is the health signal.
   gpu-exporter:
-    image: docker.io/utkuozdemir/nvidia_gpu_exporter:1.15.1-nvml
+    image: docker.io/utkuozdemir/nvidia_gpu_exporter:1.18.0-nvml
     container_name: qwen-3-8-flash-next-gpu-exporter
-    restart: always
+    restart: ${RESTART_POLICY:-always}
     environment:
       # utility = NVML access only; the exporter needs no compute capability.
       NVIDIA_DRIVER_CAPABILITIES: utility
@@ -231,9 +237,9 @@ services:
   # or set GRAFANA_BIND / PROMETHEUS_BIND to 0.0.0.0 in .env -- which exposes an
   # unauthenticated Prometheus and a password-only Grafana. Prefer the tunnel.
   prometheus:
-    image: docker.io/prom/prometheus:v3.15.0
+    image: docker.io/prom/prometheus:v3.16.0
     container_name: qwen-3-8-flash-next-prometheus
-    restart: always
+    restart: ${RESTART_POLICY:-always}
     ports:
       - "${PROMETHEUS_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
@@ -267,9 +273,9 @@ services:
   # Five failed logins then lock the account for five minutes, during which the
   # UI insists the password is wrong.
   grafana:
-    image: docker.io/grafana/grafana:13.2.3
+    image: docker.io/grafana/grafana:13.3.0
     container_name: qwen-3-8-flash-next-grafana
-    restart: always
+    restart: ${RESTART_POLICY:-always}
     ports:
       - "${GRAFANA_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     environment:
