@@ -237,8 +237,10 @@ Accepted draft tokens per verify step:
 
 All three draft tokens landing is the single most common outcome, which is why
 this repo ships `num_speculative_tokens: 3`. A later and much larger sample
-(2026-09-26, about 7,400 drafts) measured 2.74. Reproduce with
-`./scripts/spec-decode-probe.sh`.
+(2026-09-26, about 7,400 drafts) measured 2.74. To reproduce, send a
+streaming request with `"stream_options": {"include_usage": true}` and read
+`metrics.speculative_decoding` from the final chunk; the histogram needs
+`--per-request-spec-decode-metrics detailed`.
 
 On v0.34.0 (2026-11-17) six single requests from 2,855 to 261,200 prompt
 tokens, temperature 0 and thinking off, measured 2.27-2.40 from `/metrics`

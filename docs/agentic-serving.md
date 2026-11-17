@@ -173,9 +173,11 @@ whether speculative decoding is earning its keep on your traffic. If acceptance
 drops well below the 2.695 in the benchmarks, your workload drafts worse than
 the test corpus and `num_speculative_tokens: 2` may serve you better.
 
-The server also runs `--per-request-spec-decode-metrics summary`, so each
-response's usage chunk carries that request's acceptance figures
-(`./scripts/spec-decode-probe.sh` prints them).
+The server also runs `--per-request-spec-decode-metrics summary`, so a
+streaming request sent with `"stream_options": {"include_usage": true}` gets
+that request's acceptance figures in its final chunk, under
+`metrics.speculative_decoding` (`mean_acceptance_length`,
+`draft_acceptance_rate`, `acceptance_histogram`, `num_spec_steps`).
 
 ## Agents and benchmarks do not mix
 
