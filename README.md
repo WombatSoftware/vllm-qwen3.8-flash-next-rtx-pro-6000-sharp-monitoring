@@ -18,7 +18,7 @@ This is not a neutral starting point. It makes these calls for you:
   NVFP4 main weights with the official BF16 MTP head, not the FP8 one.
 - **A specific chat template** — the vendored Qwen-Sharp v22.5.0, deliberately
   *not* the one shipped inside the checkpoint.
-- **A pinned release engine** — the bare upstream vLLM v0.33.0 image, pinned
+- **A pinned release engine** — the bare upstream vLLM v0.34.0 image, pinned
   by digest, because older releases miss kernels and fixes this config
   depends on.
 - **fp8 KV cache and a 16384-token batch budget**, which only boot together.
@@ -39,11 +39,11 @@ have this GPU and want something that works on the first boot, start here.
 | | |
 |---|---|
 | GPU | RTX PRO 6000 Blackwell, 96 GB. Other 96 GB Blackwell cards likely work; anything smaller will not. |
-| Host RAM | **≥ 64 GB free.** The 47.7 GiB FP8 PLE table is pinned in host memory. Measured on a 244 GiB box. |
+| Host RAM | **≥ 64 GB free.** The 47.7 GiB FP8 PLE table is pinned in host memory. Last measured on a 122 GiB box, where the engine container held 84-93 GiB. |
 | Disk | ~130 GB for the checkpoint. |
 | Software | Docker with Compose v2 and the NVIDIA Container Toolkit. |
 
-The KV pool ends up at **401,790 tokens = 1.53x** a single max-length request.
+The KV pool ends up at **438,539 tokens = 1.67x** a single max-length request.
 That margin is the defining constraint of this box; see
 [`docs/benchmarks.md`](docs/benchmarks.md#hard-constraints-on-this-gpu).
 
@@ -68,11 +68,11 @@ outside your HF hub cache; `compose.yaml` mounts it read-only.
 **2. Pull the engine image** on the GPU host:
 
 ```bash
-docker pull vllm/vllm-openai:v0.33.0@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e
+docker pull vllm/vllm-openai:v0.34.0@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1
 ```
 
 `compose.yaml` uses `pull_policy: never`, so this step is not optional. The
-pin moves only when you move it. See [Why v0.33.0](#why-v0330). The image is
+pin moves only when you move it. See [Why v0.34.0](#why-v0340). The image is
 CUDA 13 only; the host driver must support CUDA 13.
 
 **3. Start everything:**
@@ -83,7 +83,7 @@ until curl -sf -o /dev/null http://127.0.0.1:8000/health; do sleep 5; done
 ```
 
 First boot with empty caches can take ~30 minutes (weight load, FlashInfer JIT,
-torch.compile). Subsequent boots take **about 180 s** — the caches are
+torch.compile). Subsequent boots take **about 190-230 s** — the caches are
 bind-mounted so they survive recreates.
 
 **4. Check it:**
@@ -112,11 +112,11 @@ Grafana is at <http://127.0.0.1:3000>, Prometheus at <http://127.0.0.1:9090>.
 | Tool calling | Auto tool choice with Qwen XML tool blocks parsed into `tool_calls` |
 | Reasoning | Split into `reasoning_content`, with per-request effort control |
 | Speculative decoding | MTP-3, measured 2.695 mean acceptance length, reported per request |
-| KV cache | fp8, 401,790-token pool |
+| KV cache | fp8, plus fp8 for the sparse-attention indexer cache; 438,539-token pool |
 | Monitoring | Prometheus scraping vLLM and a GPU exporter, Grafana with a 30-panel dashboard in 8 rows, provisioned |
 
-Single-stream decode is flat at roughly **139-164 t/s from 0 to 131k context**.
-Four-way concurrency reaches **358 t/s aggregate at 32k** and 347 at 8k. Full
+Single-stream decode is flat at roughly **124-173 t/s from 0 to 131k context**.
+Four-way concurrency reaches **362 t/s aggregate at 32k** and 344 at 8k. Full
 numbers, and the regression this config accepts, are in
 [`docs/benchmarks.md`](docs/benchmarks.md).
 
@@ -130,10 +130,14 @@ numbers, and the regression this config accepts, are in
   humans) changing this repo.
 - `compose.yaml` — every non-obvious flag is explained inline with its reason.
 
-## Why v0.33.0
+## Why v0.34.0
 
-The image is the bare upstream v0.33.0 release, pinned by manifest-list
-digest. Older releases will not do:
+The image is the bare upstream v0.34.0 release, pinned by manifest-list
+digest. It was swept against v0.33.0 on the same day and came out level, on
+one condition: v0.34.0 needs `--attention-config.indexer_kv_dtype fp8`, or
+the KV pool drops from 1.53x to 1.11x of a max-length request
+([`docs/benchmarks.md`](docs/benchmarks.md#engine-base)). Older releases will
+not do:
 
 - **v0.29.0 cannot load this checkpoint.** It ships the model (PR #53896) but
   has no PLE offload path, so the 47.7 GiB FP8 table has nowhere to live on a
@@ -142,7 +146,7 @@ digest. Older releases will not do:
   for this GPU (PR #55557), a tool-call parser fix (PR #56635) and the
   speculative-decoding correctness fixes (PRs #56734, #57885).
 - **v0.32.0 boots and benchmarks fine** but misses the PLE fixes #61454 and
-  #61601. v0.33.0 carries them, plus lookahead block hashes for MTP prefix
+  #61601. v0.33.0 added them, plus lookahead block hashes for MTP prefix
   caching (PR #61589, on by default), which is the likely cause of the
   doubled prefill-at-depth rows in [`docs/benchmarks.md`](docs/benchmarks.md#engine-base).
 

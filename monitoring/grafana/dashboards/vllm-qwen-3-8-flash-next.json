@@ -1886,7 +1886,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "kv_cache_usage_perc x 401790 = fp8 tokens occupied in the KV pool. The constant is the boot-time kv_cache_size_tokens (see the pool table); EDIT IT whenever the image, gpu-memory-utilization, batch pair or MTP config changes the pool, or the panel drifts from truth.",
+      "description": "kv_cache_usage_perc x 438539 = fp8 tokens occupied in the KV pool. The constant is the boot-time kv_cache_size_tokens (see the pool table); EDIT IT whenever the image, gpu-memory-utilization, batch pair or MTP config changes the pool, or the panel drifts from truth.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1894,7 +1894,7 @@
             "lineWidth": 2,
             "fillOpacity": 10
           },
-          "max": 401790,
+          "max": 438539,
           "min": 0,
           "unit": "short"
         },
@@ -1920,7 +1920,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vllm:kv_cache_usage_perc{model_name=\"$model_name\"} * 401790",
+          "expr": "vllm:kv_cache_usage_perc{model_name=\"$model_name\"} * 438539",
           "legendFormat": "tokens in use",
           "range": true
         }

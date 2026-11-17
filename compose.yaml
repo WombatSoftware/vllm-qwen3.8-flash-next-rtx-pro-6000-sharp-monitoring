@@ -19,10 +19,10 @@ services:
     # Bare upstream release, pinned by its manifest-list DIGEST. Nothing is
     # built locally: the one-function eagle-gate overlay this recipe used to
     # carry was retired once PR #55390 replaced the model-type gate with
-    # positional draft-group annotation (README "Why v0.33.0").
+    # positional draft-group annotation (README "Why v0.34.0").
     # A digest is immutable, so with pull_policy: never a compose recreate can
     # never silently move the base. Pull it once by hand (README step 2).
-    # v0.33.0 images are CUDA 13 only (#62575): the host driver must support
+    # v0.33.0+ images are CUDA 13 only (#62575): the host driver must support
     # CUDA 13 (measured on 615.71.09).
     #
     # Re-pin rule when moving to a newer base: it must contain PR #59621.
@@ -32,13 +32,15 @@ services:
     # die on every boot with `ValueError: Invalid layer_type indexed_attention`
     # before weight load (vllm#59756).
     #
-    # Why v0.33.0 and not an older release: v0.30.0 predates the fp8-QSA
+    # Why v0.34.0 and not an older release: v0.30.0 predates the fp8-QSA
     # sm_120 kernels (#55557), the hermes parser fix (#56635) and the
     # spec-decode correctness chain (#56734, #57885); v0.32.0 misses the PLE
-    # fixes #61454/#61601. v0.33.0 carries all of them plus #61589 (lookahead
-    # block hashes for MTP prefix caching, on by default), the likely cause of
-    # the doubled pp2048-at-depth rows (one sample; docs/benchmarks.md).
-    image: vllm/vllm-openai:v0.33.0@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e
+    # fixes #61454/#61601; v0.33.0 added #61589 (lookahead block hashes for
+    # MTP prefix caching, on by default), the likely cause of the doubled
+    # pp2048-at-depth rows. v0.34.0 (pinned 2026-11-17) swept level with
+    # v0.33.0 on the same day once --attention-config.indexer_kv_dtype fp8 was
+    # added (see that flag below; docs/benchmarks.md "Engine base").
+    image: vllm/vllm-openai:v0.34.0@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1
     pull_policy: never
     container_name: qwen-3-8-flash-next
 
@@ -94,7 +96,7 @@ services:
       timeout: 10s
       retries: 3
       # Cold start (first ever boot, empty caches) can take ~30 min. A warm-cache
-      # boot on this config measures about 180 s on v0.33.0.
+      # boot on this config measures 191-231 s on v0.34.0 (three boots).
       start_period: 1800s
     logging:
       driver: json-file
@@ -116,6 +118,7 @@ services:
       --long-prefill-token-threshold 8192
       --max-model-len 262144
       --kv-cache-dtype fp8
+      --attention-config.indexer_kv_dtype fp8
       --trust-remote-code
       --enable-auto-tool-choice
       --per-request-spec-decode-metrics summary
@@ -137,10 +140,14 @@ services:
     #   deleted upstream (#57937) and VLLM_PLE_OFFLOAD_READY_TIMEOUT is gone.
     #
     # --gpu-memory-utilization 0.96
-    #   With fp8 KV and the batch pair below, a healthy v0.33.0 boot reports a
-    #   401,790-token KV pool = 1.53x one max-length request (341,041 / 1.30x
-    #   on nightly-18f8f96025; the base moves it). Anything that reserves more
-    #   GPU memory still needs a boot check before you trust it.
+    #   With fp8 KV, the fp8 indexer cache and the batch pair below, a healthy
+    #   v0.34.0 boot reports a 438,539-token KV pool = 1.67x one max-length
+    #   request (401,790 / 1.53x on v0.33.0, 341,041 / 1.30x on
+    #   nightly-18f8f96025; the base moves it). Anything that reserves more
+    #   GPU memory still needs a boot check before you trust it. Since v0.34.0
+    #   the KV cache is sized from memory free after warmup and an explicit
+    #   value below 1.0 withholds the rest; 0.96 is kept because every
+    #   measurement here ran with it.
     #   Known boot risk at 0.96: the first boot can lose a CUDA-OOM lottery in
     #   the fused-MoE autotune (seen once on nightly-ac68c308; the retry booted
     #   clean). restart: always masks it at the cost of one extra boot. If it
@@ -195,6 +202,16 @@ services:
     #   decode within noise. It is not free: the QSA-compute-bound cells pay for
     #   the fp8 kernel (tg128 @ d32768 c4 363.7 -> 244.7 when first measured,
     #   ~274 now; pp2048 @ dN c1 down 20-36%). See docs/benchmarks.md.
+    #
+    # --attention-config.indexer_kv_dtype fp8
+    #   The cache of the QSA sparse-attention indexer, in fp8 like the main
+    #   KV. Added with the v0.34.0 pin and REQUIRED for the pool above: on
+    #   v0.34.0 the indexer cache no longer follows --kv-cache-dtype for this
+    #   checkpoint, and without this flag the pool is 291,543 tokens = 1.11x
+    #   (each 3,200-token block costs 76% more). With it, one sweep against a
+    #   same-day v0.33.0 control showed no loss outside a pool-bound cell,
+    #   and six requests up to 261,200 prompt tokens returned the right
+    #   record. The flag was not swept on its own.
     #
     # Keep --disable-log-stats OUT: it stops the stat loggers that feed the
     #   vllm:* Prometheus metrics the Grafana dashboard is built on.

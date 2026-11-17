@@ -13,7 +13,7 @@ The comments in `compose.yaml` are load-bearing. Nearly every flag has a
 measured reason recorded next to it in `docs/benchmarks.md`. Do not "tidy" them
 away.
 
-There is no `Dockerfile` any more. The engine is the bare upstream v0.33.0
+There is no `Dockerfile` any more. The engine is the bare upstream v0.34.0
 release image, pinned by digest in `compose.yaml`.
 
 ## Hard rules
@@ -48,15 +48,17 @@ release image, pinned by digest in `compose.yaml`.
    rather than queue). `--max-num-batched-tokens 16384` and
    `--kv-cache-dtype fp8` are a pair: the first does not boot without the
    second.
-2. The KV pool is **401,790 tokens, 1.53x** one max-length request. Anything
-   reserving more GPU memory needs a boot check before anything else. The pool
-   line is only comparable between boots with the same speculative config.
+2. The KV pool is **438,539 tokens, 1.67x** one max-length request, and only
+   with `--attention-config.indexer_kv_dtype fp8`: without it v0.34.0 boots
+   at 291,543 / 1.11x and passes every smoke test. Anything reserving more
+   GPU memory needs a boot check before anything else. The pool line is only
+   comparable between boots with the same speculative config.
 3. Validate before restarting anything:
    `docker compose config >/dev/null && echo ok`
 
 ## Restarting the engine
 
-Warm-cache boot is about 180 s. A cold first boot with empty caches can take
+Warm-cache boot is about 190-230 s on v0.34.0. A cold first boot with empty caches can take
 ~30 minutes, which is why `start_period` is 1800 s.
 
 ```bash
@@ -84,7 +86,8 @@ docker logs qwen-3-8-flash-next 2>&1 | grep -E \
 ```
 
 Expect `speculative_config` with `num_speculative_tokens: 3`, `kv_cache_dtype:
-fp8`, the mounted chat template, and a pool of about 402k tokens.
+fp8`, `indexer_kv_dtype='fp8'`, the mounted chat template, and a pool of
+about 439k tokens.
 
 ## Benchmarking
 
@@ -124,7 +127,7 @@ the base only moves when `compose.yaml` does.
 1. Pull the new image and pin it as `vllm/vllm-openai:<tag>@sha256:<digest>`
    (release or `nightly-<full sha>`). Release tags can be re-pushed; the
    digest cannot.
-2. Check it contains PR #59621 (README "Why v0.33.0" has the grep). Bases
+2. Check it contains PR #59621 (`compose.yaml` has the grep). Bases
    without it crash before weight load. v0.33.0+ images are CUDA 13 only.
 3. Keep the old image. Recreate the engine, then verify the boot lines above
    and that prefix caching still hits (`vllm:prefix_cache_hits_total` must rise
@@ -134,10 +137,16 @@ the base only moves when `compose.yaml` does.
    and return `content: null` from a healthy engine.
 4. Update the KV-pool constant in the dashboard's "KV cache tokens in use"
    panel to the new boot's `GPU KV cache size`.
+   Also compare bytes per KV block, not just the token count: `Available KV
+   cache memory` divided by `num_gpu_blocks` from `vllm:cache_config_info`.
+   v0.34.0 raised it 76% until the indexer dtype was set explicitly.
 5. Run a guarded sweep and compare against `docs/benchmarks.md` before calling
    the new base the baseline. Delete the old image only after that. A base
    that moves the pool line changes the deep 4-way preemption arithmetic, so
-   those cells are not comparable across it.
+   those cells are not comparable across it. Sweep the OLD pin again on the
+   same day as the control: the 2026-11-17 control came out far below the
+   2026-11-02 table for the same release, so a cross-day comparison would
+   have blamed the new pin for the box.
 
 When blaming a nightly for a regression, show that a suspect commit touches a
 file this model's runtime path imports. Commit-title plausibility is how the
